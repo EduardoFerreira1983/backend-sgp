@@ -10,6 +10,7 @@ from django.db.models.query_utils import Q
 import logging
 logger = logging.getLogger('sgp_api')
 
+
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     http_method_names = ['get']
     serializer_class = UserSerializer
@@ -32,7 +33,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         if not self.queryset.exists():
             return JsonResponse({'message': 'Não há usuários cadastrados.'})
-        
+
         else:
             return self.queryset
 
@@ -41,7 +42,7 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
         if queryset == JsonResponse({'message': 'Não há usuários cadastrados.'}):
             return JsonResponse({'message': 'Não foi possível recuperar usuário pois não há usuários cadastrados.'})
-        
+
         user = get_object_or_404(queryset, pk=pk)
         serializer = UserSerializer(user)
         return JsonResponse(serializer.data)
@@ -51,8 +52,9 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
 
         if pk == 'current':
             return self.request.user
-        
+
         return super().get_object()
+
 
 class ProjectViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete']
@@ -64,7 +66,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
         if self.action == 'list':
             self.permission_classes = [IsAdminUser]
         return super(self.__class__, self).get_permissions()
-    
+
     # Para fazer com que o body da requisição precise passar o id do gerente novamente,
     # é só deletar essa função.
     def create(self, request):
@@ -114,7 +116,7 @@ class ProjectViewSet(viewsets.ModelViewSet):
             return JsonResponse(serializer.data, status=201)
         else:
             return JsonResponse(serializer.errors, status=400)
-        
+
     @action(detail=False, methods=['GET'], permission_classes=[IsAuthenticated])
     def projects_by_user(self, request):
         try:
@@ -123,33 +125,74 @@ class ProjectViewSet(viewsets.ModelViewSet):
             serializer = ProjectSerializer(projects, many=True)
 
             for project in serializer.data:
-                project['manager_name'] = User.objects.get(pk=project['manager']).name
-                project['num_completed_tasks'] = Task.objects.filter(project=project['id'], status='DONE').count()
-                project['num_total_tasks'] = Task.objects.filter(project=project['id']).count()
+                project['manager_name'] = User.objects.get(
+                    pk=project['manager']).name
+                project['num_completed_tasks'] = Task.objects.filter(
+                    project=project['id'], status='DONE').count()
+                project['num_total_tasks'] = Task.objects.filter(
+                    project=project['id']).count()
 
             return JsonResponse(serializer.data, safe=False)
         except user is None:
             return JsonResponse({'message': 'Usuário não encontrado.'}, status=404)
-    
+
+    @action(detail=True, methods=['GET'], permission_classes=[IsAuthenticated])
+    def project_users(self, request, pk=None):
+        try:
+            project = Project.objects.get(pk=self.kwargs['pk'])
+            users = project.users.all()
+            serializer = UserSerializer(users, many=True)
+            for user in serializer.data:
+                del user['projects']
+                del user['email']
+                del user['role']
+            return JsonResponse(serializer.data, safe=False)
+        except project.DoesNotExist:
+            return JsonResponse({'message': 'Projeto não encontrado.'}, status=404)
+
+    @action(detail=True, methods=['GET', 'POST'], permission_classes=[IsAuthenticated])
+    def include_users(self, request, pk=None):
+        if request.method == 'GET':
+            project = Project.objects.get(pk=self.kwargs['pk'])
+            users_not_in_project = User.objects.difference(project.users.all())
+            serializer = UserSerializer(users_not_in_project, many=True)
+            return JsonResponse(serializer.data, safe=False)
+
+        elif request.method == 'POST':
+            project = Project.objects.get(pk=self.kwargs['pk'])
+            data = request.data
+
+            for user_id in data['users']:
+                if User.objects.get(pk=user_id) not in project.users.all():
+                    project.users.add(user_id)
+                else:
+                    return JsonResponse({'message': f'O usuário {User.objects.get(pk=user_id).email} já está associado a este projeto.'}, status=400)
+
+            return JsonResponse({'message': 'Usuários adicionados com sucesso.'}, status=200)
+
+        else:
+            return JsonResponse({'message': 'Método não permitido.'}, status=405)
+
     def partial_update(self, request, *args, **kwargs):
         kwargs['partial'] = True
         project = self.get_object()
         if request.user.id != project.manager.id:
             return JsonResponse({'message': 'Você não tem permissão para editar este projeto.'}, status=403)
         return super().partial_update(request, *args, **kwargs)
-    
+
     def destroy(self, request, *args, **kwargs):
         project = self.get_object()
         if request.user.id != project.manager.id:
             return JsonResponse({'message': 'Você não tem permissão para deletar este projeto.'}, status=403)
         return super().destroy(request, *args, **kwargs)
-    
+
     def get_queryset(self):
         if not self.queryset.exists():
             return JsonResponse({'message': 'Não há projetos cadastrados.'})
         else:
             return self.queryset
-    
+
+
 class TaskViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post', 'patch', 'delete']
     serializer_class = TaskSerializer
@@ -161,10 +204,10 @@ class TaskViewSet(viewsets.ModelViewSet):
             return self.queryset
         else:
             return JsonResponse({'message': 'Não há tarefas cadastradas.'})
-        
+
     def list(self, request, project__pk=None):
         queryset = Task.objects.filter(project=project__pk)
-        if not queryset.exists(): 
+        if not queryset.exists():
             return JsonResponse({'message': 'Não foi possível recuperar tarefas pois não há tarefas cadastradas.'})
         else:
             serializer = TaskSerializer(queryset, many=True)
@@ -181,18 +224,20 @@ class TaskViewSet(viewsets.ModelViewSet):
 
         if serializer.data.get('user_name') is None:
             serializer_data = serializer.data
-            serializer_data.update({'user_name': User.objects.get(pk=serializer.data['user']).name})
+            serializer_data.update(
+                {'user_name': User.objects.get(pk=serializer.data['user']).name})
             return JsonResponse(serializer_data)
         else:
             return JsonResponse(serializer.data)
-    
+
     def partial_update(self, request, project__pk=None, *args, **kwargs):
         kwargs['partial'] = True
         project = Project.objects.get(pk=project__pk)
         project_tasks = Task.objects.filter(project=project__pk)
-
         task = project_tasks.get(pk=kwargs['pk'])
 
+        if request.data.get('project') is not None:
+            return JsonResponse({'message': 'Você não pode alterar o projeto desta tarefa.'}, status=403)
         if request.data.get("status") is not None and (request.user.id != project.manager.id and request.user.id != task.user.id):
             return JsonResponse({'message': 'Você não tem permissão para alterar o status desta tarefa.'}, status=403)
 
@@ -200,6 +245,18 @@ class TaskViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         return JsonResponse(serializer.data)
+
+    def destroy(self, request, project__pk=None, *args, **kwargs):
+        project = Project.objects.get(pk=project__pk)
+        project_tasks = Task.objects.filter(project=project__pk)
+
+        task = project_tasks.get(pk=kwargs['pk'])
+        if request.user.id != project.manager.id:
+            return JsonResponse({'message': 'Você não tem permissão para deletar esta tarefa.'}, status=403)
+
+        self.perform_destroy(task)
+        return JsonResponse({'message': 'Tarefa deletada com sucesso.'}, status=200)
+
 
 class InviteViewSet(viewsets.ModelViewSet):
     http_method_names = ['get', 'post']
