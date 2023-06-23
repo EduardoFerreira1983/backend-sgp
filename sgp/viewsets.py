@@ -17,11 +17,6 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [IsAuthenticated]
     queryset = User.objects.order_by('name')
 
-    def get_permissions(self):
-        if self.action == 'list':
-            self.permission_classes = [IsAdminUser]
-        return super(self.__class__, self).get_permissions()
-
     def list(self, request):
         queryset = self.get_queryset()
         if queryset == JsonResponse({'message': 'Não há usuários cadastrados.'}):
@@ -97,8 +92,8 @@ class ProjectViewSet(viewsets.ModelViewSet):
         project = Project.objects.get(pk=self.kwargs['pk'])
         data = request.data
 
-        if request.user.id != project.manager.id:
-            return JsonResponse({'message': 'Você não tem permissão para criar tarefas neste projeto.'}, status=403)
+        # if request.user.id != project.manager.id:
+        #     return JsonResponse({'message': 'Você não tem permissão para criar tarefas neste projeto.'}, status=403)
         if User.objects.get(pk=data['user']) not in project.users.all():
             return JsonResponse({'message': 'O usuário informado não está associado a este projeto.'}, status=400)
 
@@ -147,8 +142,24 @@ class ProjectViewSet(viewsets.ModelViewSet):
                 del user['email']
                 del user['role']
             return JsonResponse(serializer.data, safe=False)
-        except project.DoesNotExist:
+        except Project.DoesNotExist:
             return JsonResponse({'message': 'Projeto não encontrado.'}, status=404)
+
+    @action(detail=True, methods=['GET'], permission_classes=[IsAuthenticated])
+    def external_users(self, request, pk=None):
+        try:
+            project = Project.objects.get(pk=self.kwargs['pk'])
+
+            if project is None:
+                return JsonResponse({'message': 'Projeto não encontrado.'}, status=404)
+            if request.user not in project.users.all():
+                return JsonResponse({'message': 'Você não tem permissão para acessar este projeto.'}, status=403)
+
+            users_not_in_project = User.objects.difference(project.users.all())
+            serializer = UserSerializer(users_not_in_project, many=True)
+            return JsonResponse(serializer.data, safe=False)
+        except Project.DoesNotExist:
+            return JsonResponse({'message': f'Projeto com id {self.kwargs["pk"]} não encontrado.'}, status=404)
 
     @action(detail=True, methods=['GET', 'POST'], permission_classes=[IsAuthenticated])
     def include_users(self, request, pk=None):
@@ -251,8 +262,8 @@ class TaskViewSet(viewsets.ModelViewSet):
         project_tasks = Task.objects.filter(project=project__pk)
 
         task = project_tasks.get(pk=kwargs['pk'])
-        if request.user.id != project.manager.id:
-            return JsonResponse({'message': 'Você não tem permissão para deletar esta tarefa.'}, status=403)
+        # if request.user.id != project.manager.id:
+        #     return JsonResponse({'message': 'Você não tem permissão para deletar esta tarefa.'}, status=403)
 
         self.perform_destroy(task)
         return JsonResponse({'message': 'Tarefa deletada com sucesso.'}, status=200)
