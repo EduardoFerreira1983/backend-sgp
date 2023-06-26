@@ -247,10 +247,10 @@ class TaskViewSet(viewsets.ModelViewSet):
         project_tasks = Task.objects.filter(project=project__pk)
         task = project_tasks.get(pk=kwargs['pk'])
 
-        if request.data.get('project') is not None:
-            return JsonResponse({'message': 'Você não pode alterar o projeto desta tarefa.'}, status=403)
-        if request.data.get("status") is not None and (request.user.id != project.manager.id and request.user.id != task.user.id):
-            return JsonResponse({'message': 'Você não tem permissão para alterar o status desta tarefa.'}, status=403)
+        # if request.data.get('project') is not None:
+        #     return JsonResponse({'message': 'Você não pode alterar o projeto desta tarefa.'}, status=403)
+        # if request.data.get("status") is not None and (request.user.id != project.manager.id and request.user.id != task.user.id):
+        #     return JsonResponse({'message': 'Você não tem permissão para alterar o status desta tarefa.'}, status=403)
 
         serializer = self.get_serializer(task, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
